@@ -170,7 +170,7 @@ as.numeric(performance(ROCRpred, "auc")@y.values)
 library(caret)
 library(e1071)
 tr.control = trainControl(method = "cv", number = 10)
-cpGrid = expand.grid( .cp = seq(0.0001,0.01,0.002))
+cpGrid = expand.grid( .cp = seq(0.0001,0.01,0.001))
 train(sold ~ ., data = train, method = "rpart", trControl = tr.control, tuneGrid = cpGrid )
 ```
 

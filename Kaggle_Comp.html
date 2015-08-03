@@ -408,7 +408,7 @@ as.numeric(performance(ROCRpred, &quot;auc&quot;)@y.values)</code></pre>
 ##     annotate</code></pre>
 <pre class="r"><code>library(e1071)
 tr.control = trainControl(method = &quot;cv&quot;, number = 10)
-cpGrid = expand.grid( .cp = seq(0.0001,0.01,0.002))
+cpGrid = expand.grid( .cp = seq(0.0001,0.01,0.001))
 train(sold ~ ., data = train, method = &quot;rpart&quot;, trControl = tr.control, tuneGrid = cpGrid )</code></pre>
 <pre><code>## CART 
 ## 
@@ -425,20 +425,25 @@ train(sold ~ ., data = train, method = &quot;rpart&quot;, trControl = tr.control
 ## 
 ##   cp      Accuracy   Kappa      Accuracy SD  Kappa SD  
 ##   0.0001  0.7674163  0.5293876  0.02132149   0.04497423
+##   0.0011  0.7743335  0.5430455  0.01594698   0.03388680
 ##   0.0021  0.7896359  0.5714294  0.03938328   0.08143665
+##   0.0031  0.7957780  0.5831451  0.04394428   0.09055433
 ##   0.0041  0.7919612  0.5748735  0.03867687   0.07958997
+##   0.0051  0.7934997  0.5775611  0.03727279   0.07705049
 ##   0.0061  0.7888843  0.5678360  0.03868024   0.08040614
+##   0.0071  0.7881210  0.5662543  0.03710725   0.07714919
 ##   0.0081  0.7888902  0.5678010  0.03657083   0.07592070
+##   0.0091  0.7888902  0.5678010  0.03657083   0.07592070
 ## 
 ## Accuracy was used to select the optimal model using  the largest value.
-## The final value used for the model was cp = 0.0041.</code></pre>
+## The final value used for the model was cp = 0.0031.</code></pre>
 <p>Вставим предложенное значение и оценим полученную модель</p>
 <pre class="r"><code>bestcp &lt;- train(sold ~ ., data = train, method = &quot;rpart&quot;, trControl = tr.control, tuneGrid = cpGrid )$bestTune
 model_cart2 &lt;- rpart(sold ~ ., data = train, method = &quot;class&quot;, cp = bestcp)
 predict_cart &lt;- predict(model_cart2, newdata = test, type = &quot;prob&quot;)[,2]
 ROCRpred = prediction(predict_cart, test$sold)
 as.numeric(performance(ROCRpred, &quot;auc&quot;)@y.values)</code></pre>
-<pre><code>## [1] 0.8024935</code></pre>
+<pre><code>## [1] 0.8021447</code></pre>
 </div>
 <div id="random-forest" class="section level3">
 <h3>Random Forest</h3>
