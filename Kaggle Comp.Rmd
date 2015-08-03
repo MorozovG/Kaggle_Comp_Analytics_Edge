@@ -1,0 +1,215 @@
+---
+title: "Kaggle Competition, The Analytics Edge"
+author: "Morozov Gleb"
+date: "2 августа 2015 г."
+output: html_document
+---
+
+В данной статье я опишу опыт своего первого участия в соревнованиии по Machine Learning, проводимых на сайте Kaggle.com. Описываемое соревнование проводилось в рамках курса "The Analytics Edge" от "Massachusetts Institute of Technology".
+
+## Описание задачи
+
+Любой продавец хотел бы знать какие характеристики товара повышают вероятность продажи товара. В данном соревновании предлагалось исследовать модели, которые предсказывали бы вероятность продажи Apple iPad на базе данных, полученных с сайта eBay. 
+
+## Данные
+
+Данные предлагаемые для изучения состояли из двух файлов:
+
+- `eBayiPadTrain.csv` - набор данных для создания модели. Содержит 1861 товар.
+- `eBayiPadTest.csv` - данные для оценки модели
+
+Для начала подключим библиотеки, применяемые в работе.
+```{r, message = F}
+library(dplyr) # Для удобной работы с данными
+library(readr) # Для загрузки данных в удобном формате
+```
+
+Теперь загрузим данные.
+```{r}
+eBayTrain <-  read_csv("eBayiPadTrain.csv")
+eBayTest <-  read_csv("eBayiPadTest.csv")
+```
+
+Посмотрим на структуру данных.
+```{r}
+summary(eBayTrain)
+str(eBayTrain)
+```
+
+Набор данных состоит из 11 переменных:
+
+- `description` - текстовое описание товара, предоставляемое продавцом 
+- `biddable` - товар выставлен на аукционе ( = 1) или с фиксированной ценой ( = 0)  
+- `startprice` - стартовая цена для аукциона (если biddable=1) или цена продажи (если biddable=0)
+- `condition` - состояние товара (новый, б/у и т.д.)
+- `cellular` - товар с мобильной связью ( = 1) или нет ( = 0)   
+- `carrier` - оператор связи (если cellular = 1) 
+- `color` - цвет      
+- `storage` - размер памяти   
+- `productline` - название модели товара
+- `sold` - был ли товар продан ( = 1) или нет ( =0). *Это будет зависимая переменная.*     
+- `UniqueID` - уникальные порядковый номер
+
+Таким образом у нас есть три типа переменных: текстовая `description`, численная `startprice` и все остальные - факторные.
+
+## Создание дополнительных переменных
+
+Посмотрим у какой части из товаров есть описание
+```{r}
+table(eBayTrain$description == "")
+```
+
+Так как далеко не все товары имеют описание, то я предположил, что этот параметр может влиять на вероятность продажи. Чтобы это учесть создадим переменную, которая будет принимать значение 1, если описание есть, и 0, в обратном случае.
+```{r}
+eBayTrain$is_descr = as.factor(eBayTrain$description == "")
+table(eBayTrain$description == "", eBayTrain$is_descr)
+```
+
+## Создание переменных для модели из текстового описания
+
+На базе текстового описания создадим переменные для модели путём выделения часто встречающихся слов. Для этого используем библиотеку `tm`.
+
+```{r, warning=FALSE}
+library(tm) ## Загружаем библиотеку
+ ## Создаём корпус из текста, необходимый для работы библиотеки
+ CorpusDescription <-  Corpus(VectorSource(c(eBayTrain$description, eBayTest$description)))
+ ## Приводим текст к строчным буквам
+ CorpusDescription <-  tm_map(CorpusDescription, content_transformer(tolower))
+ CorpusDescription <-  tm_map(CorpusDescription, PlainTextDocument)
+ ## Удаляем знаки препинания
+ CorpusDescription <-  tm_map(CorpusDescription, removePunctuation)
+ ## Удаляем так называемые стоп-слова, т.е. слова, не несущие смысловой нагрузки
+ CorpusDescription <-  tm_map(CorpusDescription, removeWords, stopwords("english"))
+ ## Производим стемминг, т.е. приводим слова к смысловым основам
+ CorpusDescription <-  tm_map(CorpusDescription, stemDocument)
+ ## Создаём частотную матрицу
+ dtm <-  DocumentTermMatrix(CorpusDescription)
+ ## Удаляем редкочастотные слова
+ sparse <-  removeSparseTerms(dtm, 0.97)
+
+ ## Преобразуем частотную матрицу в data.frame и разделим тестовую и тренировочную выборку 
+DescriptionWords = as.data.frame(as.matrix(sparse))
+colnames(DescriptionWords) = make.names(colnames(DescriptionWords))
+DescriptionWordsTrain = head(DescriptionWords, nrow(eBayTrain))
+DescriptionWordsTest = tail(DescriptionWords, nrow(eBayTest))
+```
+
+Теперь приведём оставшиеся текстовые переменные к типу данных `factor`, чтобы предотвратить их обработку моделью как текст. И объединим их с переменными, полученными из описания товара. Для этого используем очень удобную библиотеку `magnittr`
+```{r}
+library(magrittr)
+eBayTrain %<>% mutate(condition = as.factor(condition), cellular = as.factor(cellular),
+        carrier = as.factor(carrier), color = as.factor(color),
+        storage = as.factor(storage), productline = as.factor(productline), sold = as.factor(sold)) %>% 
+        select(-description, -UniqueID ) %>% cbind(., DescriptionWordsTrain)
+```
+
+Посмотрим на полученный набор переменных.
+```{r}
+str(eBayTrain)
+```
+
+Произведём нормализацию переменной `startprice`, для того, чтобы данная переменная не оказывала чрезмерного влияния на результаты моделей, в связи с её гораздо более широким, по сравнению с другими переменными, диапазоном значении.
+```{r}
+eBayTrain$startprice <- (eBayTrain$startprice - mean(eBayTrain$startprice))/sd(eBayTrain$startprice)
+```
+
+## Модели
+
+С полученным набором данных будем создавать модели. Для оценки точности оценки моделей будем применять ту же оценку, которая была выбрана в соревновании. Это `AUC`. Данный параметр часто применяется для оценки моделей классификации. Он отражает вероятность с которой модель правилно определит зависимую переменную из случайного набора данных. Идеальная модель покажет значение `AUC` равное 1.0, а модель с равновероятным случайным угадыванием - 0.5.
+
+Так как формат соревнования предполагает ограниченное количество раз в сутки, которое можно будет проверять полученную модель путем загрузки полученных результатов на сайт, то для оценки моделей выделим из тренировчного набора данных собственную тестовую выборку. Для получения сбалансировонной выборки используем библиотеку `caTools`.
+```{r}
+set.seed(1000) ## Для воспроизводимости исследования
+library(caTools)
+split <- sample.split(eBayTrain$sold, SplitRatio = 0.7)
+train  <- filter(eBayTrain, split == T)
+test <- filter(eBayTrain, split == F)
+```
+
+
+### Логистическая классификация
+
+Создадим модель логистической регрессии
+```{r}
+model_glm1 <- glm(sold ~ ., data = train, family = binomial)
+```
+
+Посмотрим на значимость переменных для модели
+```{r}
+summary(model_glm1)
+```
+Видно, что для простой логистической модели значимых переменных в данных немного
+
+Оценим `AUC` на тестовых данных. Для этого используем библиотеку `ROCR`
+```{r}
+library(ROCR)
+predict_glm <- predict(model_glm1, newdata = test, type = "response" )
+ROCRpred = prediction(predict_glm, test$sold)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+Результат, полученный с помощью данной модели уже очень неплох, но необходимо сравнить его оценками других моделей.
+
+
+### Деревья классификации (CART model)
+
+Теперь посмотрим на результаты полученные с помощью CART модели
+```{r}
+library(rpart)
+library(rpart.plot)
+model_cart1 <- rpart(sold ~ ., data = train, method = "class")
+prp(model_cart1)
+predict_cart <- predict(model_cart1, newdata = test, type = "prob")[,2]
+ROCRpred = prediction(predict_cart, test$sold)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+
+Модель производит оценку хуже чем предыдущая. Попробуем улучшить результаты с помощью подбора параметров путём cross-validation. Будем подбирать параметр `cp`, который определяет сложность модели
+```{r}
+library(caret)
+library(e1071)
+tr.control = trainControl(method = "cv", number = 10)
+cpGrid = expand.grid( .cp = seq(0.0001,0.01,0.002))
+train(sold ~ ., data = train, method = "rpart", trControl = tr.control, tuneGrid = cpGrid )
+```
+
+Вставим предложенное значение и оценим полученную модель
+```{r}
+bestcp <- train(sold ~ ., data = train, method = "rpart", trControl = tr.control, tuneGrid = cpGrid )$bestTune
+model_cart2 <- rpart(sold ~ ., data = train, method = "class", cp = bestcp)
+predict_cart <- predict(model_cart2, newdata = test, type = "prob")[,2]
+ROCRpred = prediction(predict_cart, test$sold)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+
+### Random Forest
+
+Посмотрим на результаты наиболее сложной в теории модели, но очень простой в применении - Random Forest
+```{r}
+library(randomForest)
+set.seed(1000)
+model_rf <- randomForest(sold ~ ., data = train, importance = T)
+predict_rf  <- predict(model_rf, newdata = test, type = "prob")[,2]
+ROCRpred = prediction(predict_rf, test$sold)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+
+Как видим, модель уже показывает наилучшие результаты из всех использованных. Попробуем улучшить её путём отсеивания лишних переменных. В этом нам поможет наличие встроенной в модель оценки важности переменных.
+```{r}
+varImpPlot(model_rf)
+```
+
+По левому графику мы видим, что у модели есть переменная, которые имеют отрицательное значение важности. Уберём её и произведём оценку улучшенной модели.
+```{r}
+set.seed(1000)
+model_rf2 <- randomForest(sold ~ .-excel, data = train, importance = T)
+predict_rf  <- predict(model_rf2, newdata = test, type = "prob")[,2]
+ROCRpred = prediction(predict_rf, test$sold)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+
+Оценка показала, что улучшения модели не произошло, но, исходя из здравого смысла, я считаю, что наличие слова `excel` в описании товара, практически невероятно, что может влиять на продажи, а упрощение модели (без существенного ущерба качеству) улучшает её интерпретацию.
+
+Таким образом, наилучшие результаты из всех исследованных моделей показала логистическая регрессия. На момент написания данного отчёта данная модель занимала 180 место из 1500 участников.
+
+
+
